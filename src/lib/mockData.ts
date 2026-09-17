@@ -19,7 +19,7 @@ export const initialShopSettings: ShopSettings = {
   upi_payee_name: 'Shriramwar Opticals',
   enable_upi_qr: true,
   logo_url: '/logo.jpg',
-  admin_password: '12345',
+  admin_password: 'admin',
   terms_conditions: '1. Goods once sold will not be taken back without original receipt.\n2. Warranty on frames/coatings as per manufacturer policy.',
 };
 

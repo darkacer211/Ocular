@@ -30,7 +30,7 @@ export const ShopSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ 
             const remoteSettings = data[0];
             const currentLocal = LocalStoreManager.getSettings();
             
-            // Merge remote into local
+            // Merge remote into local (preserving admin_password if remote has it)
             const merged: ShopSettings = { ...currentLocal, ...remoteSettings };
             LocalStoreManager.saveSettings(merged);
             setSettings(merged);
@@ -38,7 +38,12 @@ export const ShopSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ 
             // Supabase settings table is empty: Push current local settings to Supabase!
             try {
               const currentLocal = LocalStoreManager.getSettings();
-              await (supabase as any).from('settings').insert([currentLocal]);
+              const insertRes = await (supabase as any).from('settings').insert([currentLocal]);
+              if (insertRes?.error) {
+                // If column admin_password missing, insert without it
+                const { admin_password, ...dbPayload } = currentLocal as any;
+                await (supabase as any).from('settings').insert([dbPayload]);
+              }
             } catch (insertErr) {
               console.warn('Could not seed initial settings to Supabase', insertErr);
             }
@@ -56,14 +61,16 @@ export const ShopSettingsProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const { data: existing } = await (supabase as any).from('settings').select('id').limit(1);
         const { admin_password, ...dbPayload } = saved as any;
         
-        // Try saving full payload, fallback without admin_password if column doesn't exist yet
-        try {
-          if (existing && existing.length > 0) {
-            await (supabase as any).from('settings').update(saved).eq('id', existing[0].id);
-          } else {
-            await (supabase as any).from('settings').insert([saved]);
-          }
-        } catch (_) {
+        let res: any;
+        if (existing && existing.length > 0) {
+          res = await (supabase as any).from('settings').update(saved).eq('id', existing[0].id);
+        } else {
+          res = await (supabase as any).from('settings').insert([saved]);
+        }
+
+        // If saving with admin_password returned an error (e.g., column does not exist yet in Supabase)
+        if (res?.error) {
+          console.warn('Supabase settings update with full payload failed, falling back to payload without admin_password:', res.error);
           if (existing && existing.length > 0) {
             await (supabase as any).from('settings').update(dbPayload).eq('id', existing[0].id);
           } else {

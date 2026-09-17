@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.settings (
     enable_upi_qr BOOLEAN DEFAULT true,
     terms_conditions TEXT DEFAULT '1. Goods once sold will not be taken back without original receipt.\n2. Warranty on frames/coatings as per manufacturer policy.',
     logo_url TEXT,
+    admin_password TEXT DEFAULT 'admin',
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );

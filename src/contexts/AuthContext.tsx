@@ -89,14 +89,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const entered = password.trim();
-      const localPwd = (LocalStoreManager.getSettings().admin_password || '12345').trim();
+      const localPwd = (LocalStoreManager.getSettings().admin_password || '').trim();
 
-      if (
-        entered === currentAdminPassword ||
-        entered === localPwd ||
-        entered === '12345' ||
-        entered === 'admin'
-      ) {
+      // The configured password is the one from Supabase (or local settings if Supabase didn't have one)
+      const expectedPassword = currentAdminPassword || localPwd || 'admin';
+
+      if (entered === expectedPassword) {
         const loggedInUser = {
           ...DEMO_USER,
           email: settings.email || 'owner@shriramwaropticals.com',

@@ -129,6 +129,10 @@ export class LocalStoreManager {
     setLocalItem(STORAGE_KEYS.CUSTOMERS, customers);
   }
 
+  static setCustomers(customers: Customer[]): void {
+    setLocalItem(STORAGE_KEYS.CUSTOMERS, customers);
+  }
+
   static saveCustomer(custData: Omit<Customer, 'id' | 'created_at'> & { id?: string }): Customer {
     const customers = getLocalItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, initialCustomers);
     const now = new Date().toISOString();
@@ -306,7 +310,10 @@ export class LocalStoreManager {
 
   // --- PAYMENTS ---
   static getPayments(): Payment[] {
-    return getLocalItem<Payment[]>(STORAGE_KEYS.PAYMENTS, initialPayments);
+    const payments = getLocalItem<Payment[]>(STORAGE_KEYS.PAYMENTS, initialPayments);
+    const bills = this.getBills();
+    const validBillIds = new Set(bills.map(b => b.id));
+    return payments.filter(p => !p.bill_id || validBillIds.has(p.bill_id));
   }
 
   static addPayment(paymentData: Omit<Payment, 'id' | 'created_at'>): Payment {
@@ -426,7 +433,8 @@ export class LocalStoreManager {
 
   static getMetrics(filterDate: string = getTodayDateString()): DashboardMetrics {
     const bills = this.getBills().filter(b => !b.is_cancelled);
-    const payments = this.getPayments();
+    const validBillIds = new Set(bills.map(b => b.id));
+    const payments = this.getPayments().filter(p => !p.bill_id || validBillIds.has(p.bill_id));
     const customers = this.getCustomers();
     const withdrawals = this.getWithdrawals();
 

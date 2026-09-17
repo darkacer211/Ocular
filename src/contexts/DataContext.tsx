@@ -84,49 +84,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const supaCustomers = (custRes.data as any) || [];
           const supaPayments = (payRes.data as any) || [];
 
-          // Only replace local data with Supabase if Supabase actually has records.
-          if (supaCustomers.length > 0 || supaBills.length > 0) {
-            // Cross-validate: only include payments that have a matching bill in Supabase.
-            // This automatically excludes payments from deleted bills even if the
-            // Supabase DELETE failed (e.g. due to RLS) — orphaned payments won't count.
-            const validBillIds = new Set(supaBills.map((b: any) => b.id));
-            const cleanPayments = supaPayments.filter((p: any) => validBillIds.has(p.bill_id));
+          // Cross-validate: only include payments that have a matching bill in Supabase.
+          // This automatically excludes payments from deleted bills.
+          const validBillIds = new Set(supaBills.map((b: any) => b.id));
+          const cleanPayments = supaPayments.filter((p: any) => validBillIds.has(p.bill_id));
 
-            // If bills have paid amounts but no explicit payment records in DB, synthesize them
-            supaBills.forEach((b: any) => {
-              if (b.total_paid > 0 && !cleanPayments.some((p: any) => p.bill_id === b.id)) {
-                if (b.payment_mode === 'SPLIT') {
-                  if (b.cash_amount > 0) {
-                    cleanPayments.push({
-                      id: generateUUID(),
-                      bill_id: b.id,
-                      bill_number: b.bill_number,
-                      customer_id: b.customer_id,
-                      customer_name: b.customer_name,
-                      customer_mobile: b.customer_mobile,
-                      payment_date: b.bill_date,
-                      amount: b.cash_amount,
-                      payment_mode: 'CASH',
-                      notes: 'Advance Cash portion',
-                      created_at: b.created_at || new Date().toISOString(),
-                    });
-                  }
-                  if (b.upi_amount > 0) {
-                    cleanPayments.push({
-                      id: generateUUID(),
-                      bill_id: b.id,
-                      bill_number: b.bill_number,
-                      customer_id: b.customer_id,
-                      customer_name: b.customer_name,
-                      customer_mobile: b.customer_mobile,
-                      payment_date: b.bill_date,
-                      amount: b.upi_amount,
-                      payment_mode: 'UPI',
-                      notes: 'Advance UPI portion',
-                      created_at: b.created_at || new Date().toISOString(),
-                    });
-                  }
-                } else {
+          // If bills have paid amounts but no explicit payment records in DB, synthesize them
+          supaBills.forEach((b: any) => {
+            if (b.total_paid > 0 && !cleanPayments.some((p: any) => p.bill_id === b.id)) {
+              if (b.payment_mode === 'SPLIT') {
+                if (b.cash_amount > 0) {
                   cleanPayments.push({
                     id: generateUUID(),
                     bill_id: b.id,
@@ -135,26 +102,55 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     customer_name: b.customer_name,
                     customer_mobile: b.customer_mobile,
                     payment_date: b.bill_date,
-                    amount: b.total_paid,
-                    payment_mode: b.payment_mode || 'CASH',
-                    notes: 'Advance payment',
+                    amount: b.cash_amount,
+                    payment_mode: 'CASH',
+                    notes: 'Advance Cash portion',
                     created_at: b.created_at || new Date().toISOString(),
                   });
                 }
+                if (b.upi_amount > 0) {
+                  cleanPayments.push({
+                    id: generateUUID(),
+                    bill_id: b.id,
+                    bill_number: b.bill_number,
+                    customer_id: b.customer_id,
+                    customer_name: b.customer_name,
+                    customer_mobile: b.customer_mobile,
+                    payment_date: b.bill_date,
+                    amount: b.upi_amount,
+                    payment_mode: 'UPI',
+                    notes: 'Advance UPI portion',
+                    created_at: b.created_at || new Date().toISOString(),
+                  });
+                }
+              } else {
+                cleanPayments.push({
+                  id: generateUUID(),
+                  bill_id: b.id,
+                  bill_number: b.bill_number,
+                  customer_id: b.customer_id,
+                  customer_name: b.customer_name,
+                  customer_mobile: b.customer_mobile,
+                  payment_date: b.bill_date,
+                  amount: b.total_paid,
+                  payment_mode: b.payment_mode || 'CASH',
+                  notes: 'Advance payment',
+                  created_at: b.created_at || new Date().toISOString(),
+                });
               }
-            });
+            }
+          });
 
-            setCustomers(supaCustomers);
-            setBills(supaBills);
-            setPayments(cleanPayments);
-            setAuditLogs((auditRes.data as any) || []);
-            setWithdrawals(LocalStoreManager.getWithdrawals());
+          setCustomers(supaCustomers);
+          setBills(supaBills);
+          setPayments(cleanPayments);
+          setAuditLogs((auditRes.data as any) || []);
+          setWithdrawals(LocalStoreManager.getWithdrawals());
 
-            // Mirror back to localStorage so getMetrics() always reads clean data
-            supaCustomers.forEach((c: any) => LocalStoreManager.upsertCustomerLocal(c));
-            LocalStoreManager.syncStateToLocal(supaBills, cleanPayments);
-            setMetrics(LocalStoreManager.getMetrics());
-          }
+          // Always mirror Supabase state directly to localStorage so getMetrics() reads clean data
+          LocalStoreManager.setCustomers(supaCustomers);
+          LocalStoreManager.syncStateToLocal(supaBills, cleanPayments);
+          setMetrics(LocalStoreManager.getMetrics());
 
           setIsSupabaseLive(true);
         } else {
@@ -169,6 +165,27 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     loadData();
+
+    // Set up real-time listener so deleting or inserting records in Supabase updates the UI immediately
+    if (isSupabaseConfigured && supabase) {
+      const client = supabase;
+      const channel = client
+        .channel('realtime-db-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bills' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+          loadData();
+        })
+        .subscribe();
+
+      return () => {
+        client.removeChannel(channel);
+      };
+    }
   }, [loadData]);
 
   // Keep metrics in sync with data changes

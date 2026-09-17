@@ -208,3 +208,9 @@ CREATE POLICY "Full access to bill_items" ON public.bill_items FOR ALL TO anon, 
 CREATE POLICY "Full access to payments" ON public.payments FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Full access to withdrawals" ON public.withdrawals FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Full access to audit_logs" ON public.audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- 11. Enable Supabase Realtime for instant multi-device & dashboard sync
+ALTER PUBLICATION supabase_realtime ADD TABLE public.bills;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.payments;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.customers;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.settings;

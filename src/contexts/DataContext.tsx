@@ -85,15 +85,46 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const supaPayments = (payRes.data as any) || [];
 
           // Cross-validate: only include payments that have a matching bill in Supabase.
-          // This automatically excludes payments from deleted bills.
+          // If bills is empty, payments must strictly be empty.
           const validBillIds = new Set(supaBills.map((b: any) => b.id));
-          const cleanPayments = supaPayments.filter((p: any) => validBillIds.has(p.bill_id));
+          const cleanPayments = supaBills.length === 0 ? [] : supaPayments.filter((p: any) => validBillIds.has(p.bill_id));
 
           // If bills have paid amounts but no explicit payment records in DB, synthesize them
-          supaBills.forEach((b: any) => {
-            if (b.total_paid > 0 && !cleanPayments.some((p: any) => p.bill_id === b.id)) {
-              if (b.payment_mode === 'SPLIT') {
-                if (b.cash_amount > 0) {
+          if (supaBills.length > 0) {
+            supaBills.forEach((b: any) => {
+              if (b.total_paid > 0 && !cleanPayments.some((p: any) => p.bill_id === b.id)) {
+                if (b.payment_mode === 'SPLIT') {
+                  if (b.cash_amount > 0) {
+                    cleanPayments.push({
+                      id: generateUUID(),
+                      bill_id: b.id,
+                      bill_number: b.bill_number,
+                      customer_id: b.customer_id,
+                      customer_name: b.customer_name,
+                      customer_mobile: b.customer_mobile,
+                      payment_date: b.bill_date,
+                      amount: b.cash_amount,
+                      payment_mode: 'CASH',
+                      notes: 'Advance Cash portion',
+                      created_at: b.created_at || new Date().toISOString(),
+                    });
+                  }
+                  if (b.upi_amount > 0) {
+                    cleanPayments.push({
+                      id: generateUUID(),
+                      bill_id: b.id,
+                      bill_number: b.bill_number,
+                      customer_id: b.customer_id,
+                      customer_name: b.customer_name,
+                      customer_mobile: b.customer_mobile,
+                      payment_date: b.bill_date,
+                      amount: b.upi_amount,
+                      payment_mode: 'UPI',
+                      notes: 'Advance UPI portion',
+                      created_at: b.created_at || new Date().toISOString(),
+                    });
+                  }
+                } else {
                   cleanPayments.push({
                     id: generateUUID(),
                     bill_id: b.id,
@@ -102,44 +133,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     customer_name: b.customer_name,
                     customer_mobile: b.customer_mobile,
                     payment_date: b.bill_date,
-                    amount: b.cash_amount,
-                    payment_mode: 'CASH',
-                    notes: 'Advance Cash portion',
+                    amount: b.total_paid,
+                    payment_mode: b.payment_mode || 'CASH',
+                    notes: 'Advance payment',
                     created_at: b.created_at || new Date().toISOString(),
                   });
                 }
-                if (b.upi_amount > 0) {
-                  cleanPayments.push({
-                    id: generateUUID(),
-                    bill_id: b.id,
-                    bill_number: b.bill_number,
-                    customer_id: b.customer_id,
-                    customer_name: b.customer_name,
-                    customer_mobile: b.customer_mobile,
-                    payment_date: b.bill_date,
-                    amount: b.upi_amount,
-                    payment_mode: 'UPI',
-                    notes: 'Advance UPI portion',
-                    created_at: b.created_at || new Date().toISOString(),
-                  });
-                }
-              } else {
-                cleanPayments.push({
-                  id: generateUUID(),
-                  bill_id: b.id,
-                  bill_number: b.bill_number,
-                  customer_id: b.customer_id,
-                  customer_name: b.customer_name,
-                  customer_mobile: b.customer_mobile,
-                  payment_date: b.bill_date,
-                  amount: b.total_paid,
-                  payment_mode: b.payment_mode || 'CASH',
-                  notes: 'Advance payment',
-                  created_at: b.created_at || new Date().toISOString(),
-                });
               }
-            }
-          });
+            });
+          }
 
           setCustomers(supaCustomers);
           setBills(supaBills);
@@ -166,10 +168,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     loadData();
 
+    // Auto-sync whenever user switches back to this tab from Supabase dashboard
+    const handleSyncOnActive = () => {
+      loadData();
+    };
+    window.addEventListener('focus', handleSyncOnActive);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     // Set up real-time listener so deleting or inserting records in Supabase updates the UI immediately
+    let channel: any = null;
+    let client: any = null;
     if (isSupabaseConfigured && supabase) {
-      const client = supabase;
-      const channel = client
+      client = supabase;
+      channel = client
         .channel('realtime-db-sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'bills' }, () => {
           loadData();
@@ -181,11 +197,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           loadData();
         })
         .subscribe();
-
-      return () => {
-        client.removeChannel(channel);
-      };
     }
+
+    return () => {
+      window.removeEventListener('focus', handleSyncOnActive);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (client && channel) {
+        client.removeChannel(channel);
+      }
+    };
   }, [loadData]);
 
   // Keep metrics in sync with data changes

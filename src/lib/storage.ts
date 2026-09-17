@@ -312,8 +312,11 @@ export class LocalStoreManager {
   static getPayments(): Payment[] {
     const payments = getLocalItem<Payment[]>(STORAGE_KEYS.PAYMENTS, initialPayments);
     const bills = this.getBills();
+    if (bills.length === 0) {
+      return [];
+    }
     const validBillIds = new Set(bills.map(b => b.id));
-    return payments.filter(p => !p.bill_id || validBillIds.has(p.bill_id));
+    return payments.filter(p => Boolean(p.bill_id && validBillIds.has(p.bill_id)));
   }
 
   static addPayment(paymentData: Omit<Payment, 'id' | 'created_at'>): Payment {
@@ -434,7 +437,7 @@ export class LocalStoreManager {
   static getMetrics(filterDate: string = getTodayDateString()): DashboardMetrics {
     const bills = this.getBills().filter(b => !b.is_cancelled);
     const validBillIds = new Set(bills.map(b => b.id));
-    const payments = this.getPayments().filter(p => !p.bill_id || validBillIds.has(p.bill_id));
+    const payments = bills.length === 0 ? [] : this.getPayments().filter(p => Boolean(p.bill_id && validBillIds.has(p.bill_id)));
     const customers = this.getCustomers();
     const withdrawals = this.getWithdrawals();
 

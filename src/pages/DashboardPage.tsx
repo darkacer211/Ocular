@@ -19,6 +19,7 @@ import {
   Wallet,
   ArrowUpRight,
   ArrowDownRight,
+  RefreshCw,
 } from 'lucide-react';
 
 interface DashboardPageProps {
@@ -35,7 +36,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onCollectPayment,
   onNavigate,
 }) => {
-  const { metrics, bills, payments, customers, withdrawals } = useData();
+  const { metrics, bills, payments, customers, withdrawals, refreshData, isLoading } = useData();
   const { settings } = useShopSettings();
 
   const recentBills = bills.filter((b: Bill) => !b.is_cancelled).slice(0, 8);
@@ -49,10 +50,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         'Mobile': b.customer_mobile,
         'Total (₹)': b.total_amount,
         'Paid (₹)': b.total_paid,
-        'Remaining (₹)': b.remaining_amount,
+        'Balance (₹)': b.remaining_amount,
         'Status': b.payment_status,
         'Mode': b.payment_mode,
-        'Cancelled': b.is_cancelled ? 'Yes' : 'No',
       })),
       payments: payments.map((p: any) => ({
         'Date': p.payment_date,
@@ -63,10 +63,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         'Notes': p.notes || '',
       })),
       customers: customers.map((c: Customer) => ({
-        'Name': c.name,
+        'Customer Name': c.name,
         'Mobile': c.mobile,
-        'Address': c.address || '',
         'Total Purchases (₹)': c.total_purchases || 0,
+        'Total Paid (₹)': c.total_paid || 0,
         'Outstanding (₹)': c.outstanding_balance || 0,
         'Bills Count': c.bill_count || 0,
       })),
@@ -100,7 +100,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <p className="text-xs text-slate-400 mt-0.5">{formatDate(new Date().toISOString())} — {settings.city}</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
             size="lg"
@@ -109,6 +109,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             className="bg-brand-500 hover:bg-brand-400 font-extrabold shadow-lg shadow-brand-600/40 text-sm"
           >
             + Create New Bill
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refreshData()}
+            leftIcon={<RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />}
+            className="bg-white/10 text-white border-white/20 hover:bg-white/20 text-xs font-semibold"
+            title="Force refresh data from Supabase cloud database"
+          >
+            Sync Cloud
           </Button>
           <Button
             variant="outline"

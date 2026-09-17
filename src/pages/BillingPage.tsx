@@ -81,11 +81,17 @@ export const BillingPage: React.FC<BillingPageProps> = ({
   const [createdBill, setCreatedBill] = useState<Bill | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
 
-  // Auto-generate Bill Number
+  // Helper to generate the next sequential auto number
+  const generateNewAutoBillNumber = () => {
+    return generateNextBillNumber(bills, settings.invoice_prefix || 'BILL');
+  };
+
+  // Auto-generate Bill Number on initial load if not set
   useEffect(() => {
-    const nextBillNo = generateNextBillNumber(bills.length, settings.invoice_prefix || 'BILL');
-    setBillNumber(nextBillNo);
-  }, [bills.length, settings.invoice_prefix]);
+    if (!billNumber) {
+      setBillNumber(generateNewAutoBillNumber());
+    }
+  }, [bills, settings.invoice_prefix]);
 
   // Customer Auto-fill on mobile input
   const handleMobileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,6 +129,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     setCustomerMobile('');
     setCustomerAddress('');
     setMatchedCustomer(null);
+    setBillDate(getTodayDateString());
     setItems([
       {
         id: `item-${Date.now()}-1`,
@@ -138,14 +145,27 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     setCashAmount(0);
     setUpiAmount(0);
     setNotes('');
-    const nextBillNo = generateNextBillNumber(bills.length, settings.invoice_prefix || 'BILL');
-    setBillNumber(nextBillNo);
+    setBillNumber(generateNewAutoBillNumber());
   };
 
   const handleSaveBill = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validation
+    const trimmedBillNo = billNumber.trim();
+    if (!trimmedBillNo) {
+      warning('Bill Number Required', 'Please enter or generate a bill number');
+      return;
+    }
+
+    const isDuplicate = bills.some(
+      (b: Bill) => !b.is_cancelled && b.bill_number.trim().toLowerCase() === trimmedBillNo.toLowerCase()
+    );
+    if (isDuplicate) {
+      warning('Duplicate Bill Number', `A bill with number "${trimmedBillNo}" already exists. Please choose a unique bill number.`);
+      return;
+    }
+
     if (!customerName.trim()) {
       warning('Customer Name Required', 'Please enter customer full name');
       return;
@@ -172,7 +192,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
         customer_name: customerName.trim(),
         customer_mobile: customerMobile.trim(),
         customer_address: customerAddress.trim() || undefined,
-        bill_number: billNumber,
+        bill_number: trimmedBillNo,
         bill_date: billDate,
         prescription: undefined,
         items,
@@ -234,13 +254,73 @@ export const BillingPage: React.FC<BillingPageProps> = ({
           >
             Clear Form
           </Button>
-          <div className="px-3 py-1.5 rounded-lg bg-slate-900 text-white font-mono text-xs font-bold shadow-sm">
-            {billNumber}
-          </div>
         </div>
       </div>
 
       <form onSubmit={handleSaveBill} className="space-y-6">
+        {/* Customizable Bill / Invoice Number & Date Bar */}
+        <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-2xl p-4 sm:p-5 shadow-elevation border border-slate-700/60">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-brand-500/20 border border-brand-400/30 flex items-center justify-center text-brand-300 font-extrabold font-mono text-lg shadow-sm">
+                #
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                  <span>Invoice & Bill Configuration</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-brand-500/20 text-brand-300 border border-brand-500/30">
+                    Customizable
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Type your custom bill number (e.g. matching physical book) or click Auto.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Editable Bill Number */}
+              <div>
+                <label className="block text-[10px] font-bold text-brand-200 uppercase tracking-wider mb-1">
+                  Bill / Invoice No. <span className="text-rose-400">*</span>
+                </label>
+                <div className="flex items-center bg-slate-800/90 border border-slate-600 rounded-xl px-2.5 py-1.5 shadow-sm focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-400/20 transition-all">
+                  <input
+                    type="text"
+                    required
+                    value={billNumber}
+                    onChange={(e) => setBillNumber(e.target.value)}
+                    placeholder="e.g. BILL-2026-0001"
+                    className="font-mono text-xs font-bold text-white bg-transparent outline-none w-36 sm:w-44 placeholder:text-slate-400"
+                    title="Type any custom bill number here"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setBillNumber(generateNewAutoBillNumber())}
+                    className="text-[10px] text-brand-300 hover:text-white font-bold px-2 py-0.5 rounded-md bg-brand-600/40 hover:bg-brand-600 transition-colors ml-1"
+                    title="Reset to next sequential auto number"
+                  >
+                    Auto
+                  </button>
+                </div>
+              </div>
+
+              {/* Editable Bill Date */}
+              <div>
+                <label className="block text-[10px] font-bold text-brand-200 uppercase tracking-wider mb-1">
+                  Invoice Date
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={billDate}
+                  onChange={(e) => setBillDate(e.target.value)}
+                  className="bg-slate-800/90 border border-slate-600 text-white rounded-xl px-3 py-1.5 text-xs font-medium outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/20 shadow-sm cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
         {/* Customer Details */}
         <Card>
           <CardHeader className="flex items-center justify-between pb-3 mb-3">

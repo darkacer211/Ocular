@@ -51,10 +51,33 @@ export function getTodayDateString(): string {
 /**
  * Generates the next sequential unique bill number e.g. BILL-2026-0001
  */
-export function generateNextBillNumber(existingBillsCount: number, prefix: string = 'BILL'): string {
+export function generateNextBillNumber(existingBillsOrCount: { bill_number?: string }[] | number, prefix: string = 'BILL'): string {
   const year = new Date().getFullYear();
-  const sequence = String(existingBillsCount + 1).padStart(4, '0');
-  return `${prefix}-${year}-${sequence}`;
+  if (typeof existingBillsOrCount === 'number') {
+    const sequence = String(existingBillsOrCount + 1).padStart(4, '0');
+    return `${prefix}-${year}-${sequence}`;
+  }
+
+  // Find highest existing sequence for this prefix & year
+  let maxSeq = 0;
+  const cleanPrefix = (prefix || 'BILL').trim();
+  const escapedPrefix = cleanPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`^${escapedPrefix}-${year}-(\\d+)$`, 'i');
+
+  existingBillsOrCount.forEach(b => {
+    if (b.bill_number) {
+      const match = b.bill_number.match(regex);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+    }
+  });
+
+  const nextSeq = Math.max(existingBillsOrCount.length + 1, maxSeq + 1);
+  return `${cleanPrefix}-${year}-${String(nextSeq).padStart(4, '0')}`;
 }
 
 /**

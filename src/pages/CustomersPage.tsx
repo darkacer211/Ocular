@@ -52,7 +52,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
   const filteredCustomers = customers.filter(
     (c: Customer) =>
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.mobile.includes(searchTerm.trim()) ||
+      (c.mobile && c.mobile.includes(searchTerm.trim())) ||
       (c.city && c.city.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -80,8 +80,8 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
       setFormError('Customer name is required');
       return;
     }
-    if (formMobile.trim().length !== 10) {
-      setFormError('Please provide a 10-digit mobile number');
+    if (formMobile.trim() && formMobile.trim().length !== 10) {
+      setFormError('Please provide a valid 10-digit mobile number, or leave blank');
       return;
     }
 
@@ -108,8 +108,21 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
 
   // --- DRILLDOWN CUSTOMER LEDGER VIEW ---
   if (selectedCustomer) {
-    const customerBills = bills.filter((b: Bill) => b.customer_id === selectedCustomer.id);
-    const customerPayments = payments.filter((p: Payment) => p.customer_id === selectedCustomer.id);
+    const customerBills = bills.filter((b: Bill) => 
+      !b.is_cancelled && (
+        b.customer_id === selectedCustomer.id || 
+        (selectedCustomer.mobile && b.customer_mobile && b.customer_mobile === selectedCustomer.mobile) ||
+        (!selectedCustomer.mobile && !b.customer_mobile && b.customer_name?.toLowerCase() === selectedCustomer.name?.toLowerCase())
+      )
+    );
+    const customerPayments = payments.filter((p: Payment) => 
+      p.customer_id === selectedCustomer.id ||
+      customerBills.some(b => b.id === p.bill_id || b.bill_number === p.bill_number)
+    );
+
+    const drillPurchases = customerBills.reduce((sum, b) => sum + (b.total_amount || 0), 0);
+    const drillPaid = customerBills.reduce((sum, b) => sum + (b.total_paid || 0), 0);
+    const drillOutstanding = Math.max(0, drillPurchases - drillPaid);
 
     return (
       <div className="space-y-6">
@@ -163,9 +176,9 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
               Total Purchases
             </span>
             <p className="text-xl font-extrabold font-mono text-slate-900 mt-1">
-              {formatCurrency(selectedCustomer.total_purchases)}
+              {formatCurrency(drillPurchases)}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">{selectedCustomer.bill_count} invoices</p>
+            <p className="text-[11px] text-slate-400 mt-1">{customerBills.length} invoices</p>
           </Card>
 
           <Card>
@@ -173,7 +186,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
               Total Paid
             </span>
             <p className="text-xl font-extrabold font-mono text-emerald-600 mt-1">
-              {formatCurrency(selectedCustomer.total_paid)}
+              {formatCurrency(drillPaid)}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">{customerPayments.length} transactions</p>
           </Card>
@@ -183,10 +196,10 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
               Outstanding Due
             </span>
             <p className="text-xl font-extrabold font-mono text-rose-600 mt-1">
-              {formatCurrency(selectedCustomer.outstanding_balance)}
+              {formatCurrency(drillOutstanding)}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">
-              {(selectedCustomer.outstanding_balance || 0) === 0 ? 'Fully Cleared' : 'Pending Payment'}
+              {drillOutstanding === 0 ? 'Fully Cleared' : 'Pending Payment'}
             </p>
           </Card>
 
@@ -394,66 +407,84 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((cust: Customer) => (
-                  <tr
-                    key={cust.id}
-                    className="hover:bg-slate-50/80 transition-colors cursor-pointer"
-                    onClick={() => onSelectCustomer(cust)}
-                  >
-                    <td className="p-3.5">
-                      <p className="font-bold text-slate-900 text-sm hover:text-brand-600">
-                        {cust.name}
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        Since {formatDate(cust.created_at)}
-                      </p>
-                    </td>
-                    <td className="p-3.5 font-mono font-medium text-slate-700">
-                      +91 {cust.mobile}
-                    </td>
-                    <td className="p-3.5 text-slate-600 truncate max-w-[180px]">
-                      {cust.address || cust.city || '-'}
-                    </td>
-                    <td className="p-3.5 text-center font-mono font-bold text-slate-800">
-                      {cust.bill_count || 0}
-                    </td>
-                    <td className="p-3.5 text-right font-mono font-bold text-slate-900">
-                      {formatCurrency(cust.total_purchases)}
-                    </td>
-                    <td className="p-3.5 text-right font-mono font-semibold text-emerald-600">
-                      {formatCurrency(cust.total_paid)}
-                    </td>
-                    <td className="p-3.5 text-right font-mono font-bold">
-                      {(cust.outstanding_balance || 0) > 0 ? (
-                        <span className="text-rose-600">
-                          {formatCurrency(cust.outstanding_balance)}
-                        </span>
-                      ) : (
-                        <span className="text-emerald-600 text-[11px]">₹0 (Paid)</span>
-                      )}
-                    </td>
-                    <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-center gap-1.5">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onSelectCustomer(cust)}
-                          className="px-2.5 py-1 text-xs"
-                        >
-                          View Ledger
-                        </Button>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => onOpenNewBillForCustomer(cust)}
-                          className="px-2.5 py-1 text-xs"
-                        >
-                          + Bill
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                filteredCustomers.map((cust: Customer) => {
+                  const custBills = bills.filter((b: Bill) => 
+                    !b.is_cancelled && (
+                      b.customer_id === cust.id ||
+                      (cust.mobile && b.customer_mobile && b.customer_mobile === cust.mobile) ||
+                      (!cust.mobile && !b.customer_mobile && b.customer_name?.toLowerCase() === cust.name?.toLowerCase())
+                    )
+                  );
+                  const totalPurchases = custBills.reduce((sum, b) => sum + (b.total_amount || 0), 0);
+                  const totalPaid = custBills.reduce((sum, b) => sum + (b.total_paid || 0), 0);
+                  const outstandingBalance = Math.max(0, totalPurchases - totalPaid);
+                  const billCount = custBills.length;
+
+                  return (
+                    <tr
+                      key={cust.id}
+                      className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                      onClick={() => onSelectCustomer(cust)}
+                    >
+                      <td className="p-3.5">
+                        <p className="font-bold text-slate-900 text-sm hover:text-brand-600">
+                          {cust.name}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          Since {formatDate(cust.created_at)}
+                        </p>
+                      </td>
+                      <td className="p-3.5 font-mono font-medium text-slate-700">
+                        {cust.mobile ? (
+                          <span>+91 {cust.mobile}</span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 italic">No mobile</span>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-slate-600 truncate max-w-[180px]">
+                        {cust.address || cust.city || '-'}
+                      </td>
+                      <td className="p-3.5 text-center font-mono font-bold text-slate-800">
+                        {billCount}
+                      </td>
+                      <td className="p-3.5 text-right font-mono font-bold text-slate-900">
+                        {formatCurrency(totalPurchases)}
+                      </td>
+                      <td className="p-3.5 text-right font-mono font-semibold text-emerald-600">
+                        {formatCurrency(totalPaid)}
+                      </td>
+                      <td className="p-3.5 text-right font-mono font-bold">
+                        {outstandingBalance > 0 ? (
+                          <span className="text-rose-600">
+                            {formatCurrency(outstandingBalance)}
+                          </span>
+                        ) : (
+                          <span className="text-emerald-600 text-[11px]">₹0 (Paid)</span>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onSelectCustomer(cust)}
+                            className="px-2.5 py-1 text-xs"
+                          >
+                            View Ledger
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => onOpenNewBillForCustomer(cust)}
+                            className="px-2.5 py-1 text-xs"
+                          >
+                            + Bill
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -477,9 +508,8 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
             leftIcon={<User className="w-4 h-4" />}
           />
           <Input
-            label="10-Digit Mobile Number"
-            placeholder="e.g. 9822011223"
-            required
+            label="Mobile Number (Optional)"
+            placeholder="e.g. 9822011223 (optional)"
             maxLength={10}
             value={formMobile}
             onChange={(e) => setFormMobile(e.target.value)}

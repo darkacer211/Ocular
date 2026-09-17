@@ -70,7 +70,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ bill, isOpen, onClos
     doc.text(`Status: ${bill.payment_status}`, 14, 67);
 
     doc.text(`Customer Name: ${bill.customer_name}`, 120, 55);
-    doc.text(`Mobile: +91 ${bill.customer_mobile}`, 120, 61);
+    doc.text(bill.customer_mobile ? `Mobile: +91 ${bill.customer_mobile}` : 'Mobile: N/A', 120, 61);
     if (bill.customer_address) {
       doc.text(`Address: ${bill.customer_address}`, 120, 67);
     }
@@ -101,10 +101,23 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ bill, isOpen, onClos
     }
 
     // Bill Items Table
-    const tableRows = bill.items.map((item, index) => [
+    const billItems = bill.items && bill.items.length > 0 ? bill.items : [
+      {
+        id: 'default-1',
+        item_type: 'general',
+        product_name: 'Optical Goods / Services',
+        brand: '',
+        quantity: 1,
+        unit_price: bill.total_amount,
+        discount: bill.discount_amount || 0,
+        total_price: bill.total_amount,
+      }
+    ];
+
+    const tableRows = billItems.map((item, index) => [
       index + 1,
       `${item.product_name} ${item.brand ? `(${item.brand})` : ''}`,
-      item.item_type.toUpperCase(),
+      (item.item_type || 'item').toUpperCase(),
       item.quantity,
       `₹${item.unit_price}`,
       `₹${item.discount}`,
@@ -261,7 +274,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ bill, isOpen, onClos
               Billed To
             </span>
             <p className="text-sm font-bold text-slate-900 mt-0.5">{bill.customer_name}</p>
-            <p className="text-slate-600 font-mono mt-0.5">+91 {bill.customer_mobile}</p>
+            {bill.customer_mobile ? (
+              <p className="text-slate-600 font-mono mt-0.5">+91 {bill.customer_mobile}</p>
+            ) : (
+              <p className="text-slate-400 text-[11px] mt-0.5 italic">No mobile provided</p>
+            )}
             {bill.customer_address && <p className="text-slate-500 mt-0.5">{bill.customer_address}</p>}
           </div>
           <div className="sm:text-right flex flex-col justify-between">
@@ -337,26 +354,40 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ bill, isOpen, onClos
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {bill.items.map((item, index) => (
-                <tr key={item.id} className="text-slate-800">
-                  <td className="py-2.5 px-2 font-mono text-slate-400">{index + 1}</td>
+              {(bill.items && bill.items.length > 0) ? (
+                bill.items.map((item, index) => (
+                  <tr key={item.id || index} className="text-slate-800">
+                    <td className="py-2.5 px-2 font-mono text-slate-400">{index + 1}</td>
+                    <td className="py-2.5 px-2">
+                      <p className="font-semibold text-slate-900">{item.product_name}</p>
+                      {item.brand && <p className="text-[11px] text-slate-500">Brand: {item.brand}</p>}
+                    </td>
+                    <td className="py-2.5 px-2 uppercase text-[10px] font-bold text-slate-500">
+                      {item.item_type || 'item'}
+                    </td>
+                    <td className="py-2.5 px-2 text-center font-mono">{item.quantity}</td>
+                    <td className="py-2.5 px-2 text-right font-mono">{formatCurrency(item.unit_price)}</td>
+                    <td className="py-2.5 px-2 text-right font-mono text-slate-500">
+                      {item.discount > 0 ? formatCurrency(item.discount) : '-'}
+                    </td>
+                    <td className="py-2.5 px-2 text-right font-mono font-bold text-slate-900">
+                      {formatCurrency(item.total_price)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr className="text-slate-800">
+                  <td className="py-2.5 px-2 font-mono text-slate-400">1</td>
                   <td className="py-2.5 px-2">
-                    <p className="font-semibold text-slate-900">{item.product_name}</p>
-                    {item.brand && <p className="text-[11px] text-slate-500">Brand: {item.brand}</p>}
+                    <p className="font-semibold text-slate-900">Optical Products / Services</p>
                   </td>
-                  <td className="py-2.5 px-2 uppercase text-[10px] font-bold text-slate-500">
-                    {item.item_type}
-                  </td>
-                  <td className="py-2.5 px-2 text-center font-mono">{item.quantity}</td>
-                  <td className="py-2.5 px-2 text-right font-mono">{formatCurrency(item.unit_price)}</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-slate-500">
-                    {item.discount > 0 ? formatCurrency(item.discount) : '-'}
-                  </td>
-                  <td className="py-2.5 px-2 text-right font-mono font-bold text-slate-900">
-                    {formatCurrency(item.total_price)}
-                  </td>
+                  <td className="py-2.5 px-2 uppercase text-[10px] font-bold text-slate-500">GENERAL</td>
+                  <td className="py-2.5 px-2 text-center font-mono">1</td>
+                  <td className="py-2.5 px-2 text-right font-mono">{formatCurrency(bill.total_amount)}</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-slate-500">-</td>
+                  <td className="py-2.5 px-2 text-right font-mono font-bold text-slate-900">{formatCurrency(bill.total_amount)}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

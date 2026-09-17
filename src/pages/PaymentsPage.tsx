@@ -28,7 +28,7 @@ export const PaymentsPage: React.FC<PaymentsPageProps> = ({ onViewBill }) => {
     const matchesSearch =
       p.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.bill_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.customer_mobile.includes(searchTerm.trim()) ||
+      (p.customer_mobile && p.customer_mobile.includes(searchTerm.trim())) ||
       (p.reference_number && p.reference_number.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesMode = modeFilter === 'all' || p.payment_mode === modeFilter;
@@ -195,7 +195,7 @@ export const PaymentsPage: React.FC<PaymentsPageProps> = ({ onViewBill }) => {
                 </tr>
               ) : (
                 filteredPayments.map((pay: Payment) => {
-                  const bill = bills.find((b: Bill) => b.id === pay.bill_id);
+                  const bill = bills.find((b: Bill) => b.id === pay.bill_id || b.bill_number === pay.bill_number);
                   return (
                     <tr key={pay.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-3.5 text-slate-700 font-medium">
@@ -206,7 +206,11 @@ export const PaymentsPage: React.FC<PaymentsPageProps> = ({ onViewBill }) => {
                       </td>
                       <td className="p-3.5">
                         <p className="font-bold text-slate-900">{pay.customer_name}</p>
-                        <p className="text-[11px] text-slate-500 font-mono">+91 {pay.customer_mobile}</p>
+                        {pay.customer_mobile ? (
+                          <p className="text-[11px] text-slate-500 font-mono">+91 {pay.customer_mobile}</p>
+                        ) : (
+                          <p className="text-[10px] text-slate-400 italic">No mobile</p>
+                        )}
                       </td>
                       <td className="p-3.5">
                         <ModeBadge mode={pay.payment_mode} />
@@ -224,7 +228,7 @@ export const PaymentsPage: React.FC<PaymentsPageProps> = ({ onViewBill }) => {
                         {!pay.reference_number && !pay.notes && '-'}
                       </td>
                       <td className="p-3.5 text-center">
-                        {bill && (
+                        {bill ? (
                           <Button
                             variant="outline"
                             size="sm"
@@ -234,6 +238,8 @@ export const PaymentsPage: React.FC<PaymentsPageProps> = ({ onViewBill }) => {
                             <Eye className="w-3.5 h-3.5 mr-1" />
                             View Bill
                           </Button>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 italic">-</span>
                         )}
                       </td>
                     </tr>

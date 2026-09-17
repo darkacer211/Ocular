@@ -98,7 +98,12 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     const val = e.target.value;
     setCustomerMobile(val);
 
-    const found = customers.find((c: Customer) => c.mobile === val.trim());
+    if (!val.trim()) {
+      setMatchedCustomer(null);
+      return;
+    }
+
+    const found = customers.find((c: Customer) => c.mobile && c.mobile === val.trim());
     if (found) {
       setMatchedCustomer(found);
       setCustomerName(found.name);
@@ -170,8 +175,8 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       warning('Customer Name Required', 'Please enter customer full name');
       return;
     }
-    if (!isValidIndianMobile(customerMobile)) {
-      warning('Invalid Mobile Number', 'Please enter a valid 10-digit Indian mobile number');
+    if (customerMobile.trim() && !isValidIndianMobile(customerMobile.trim())) {
+      warning('Invalid Mobile Number', 'Please enter a valid 10-digit Indian mobile number, or leave blank');
       return;
     }
     if (items.length === 0 || totalAmount <= 0) {
@@ -345,9 +350,8 @@ export const BillingPage: React.FC<BillingPageProps> = ({
               leftIcon={<User className="w-4 h-4" />}
             />
             <Input
-              label="10-Digit Mobile Number"
-              placeholder="e.g. 9822011223"
-              required
+              label="Mobile Number (Optional)"
+              placeholder="e.g. 9822011223 (optional)"
               maxLength={10}
               value={customerMobile}
               onChange={handleMobileChange}

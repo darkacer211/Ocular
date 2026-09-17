@@ -95,7 +95,13 @@ export class LocalStoreManager {
 
     // Dynamically calculate aggregate stats per customer
     return customers.map(cust => {
-      const custBills = bills.filter(b => b.customer_id === cust.id && !b.is_cancelled);
+      const custBills = bills.filter(b => 
+        !b.is_cancelled && (
+          b.customer_id === cust.id || 
+          (cust.mobile && b.customer_mobile && cust.mobile === b.customer_mobile) ||
+          (!cust.mobile && !b.customer_mobile && b.customer_name?.toLowerCase() === cust.name?.toLowerCase())
+        )
+      );
       const totalPurchases = custBills.reduce((sum, b) => sum + (b.total_amount || 0), 0);
       const totalPaid = custBills.reduce((sum, b) => sum + (b.total_paid || 0), 0);
       const outstandingBalance = Math.max(0, totalPurchases - totalPaid);
@@ -179,11 +185,15 @@ export class LocalStoreManager {
     const now = new Date().toISOString();
 
     // Ensure customer exists or update
-    let customer = this.getCustomers().find(c => c.id === billData.customer_id || c.mobile === billData.customer_mobile);
+    let customer = this.getCustomers().find(c => 
+      c.id === billData.customer_id || 
+      (billData.customer_mobile && c.mobile && c.mobile === billData.customer_mobile) ||
+      (!billData.customer_mobile && c.name?.toLowerCase() === billData.customer_name?.toLowerCase())
+    );
     if (!customer) {
       customer = this.saveCustomer({
         name: billData.customer_name,
-        mobile: billData.customer_mobile,
+        mobile: billData.customer_mobile || '',
         address: billData.customer_address,
       });
     }
@@ -295,8 +305,25 @@ export class LocalStoreManager {
     setLocalItem(STORAGE_KEYS.BILLS, bills);
 
     // Also delete all payments linked to this bill
-    const payments = this.getPayments().filter(p => p.bill_id !== billId);
+    const payments = this.getPayments().filter(p => p.bill_id !== billId && p.bill_number !== bill.bill_number);
     setLocalItem(STORAGE_KEYS.PAYMENTS, payments);
+
+    // If customer has no remaining bills, delete customer record too
+    const remainingBills = bills;
+    const hasOtherBills = remainingBills.some(b => 
+      b.customer_id === bill.customer_id ||
+      (bill.customer_mobile && b.customer_mobile === bill.customer_mobile) ||
+      (!bill.customer_mobile && b.customer_name?.toLowerCase() === bill.customer_name?.toLowerCase())
+    );
+    if (!hasOtherBills) {
+      const allCustomers = getLocalItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, initialCustomers);
+      const updatedCustomers = allCustomers.filter(c => 
+        c.id !== bill.customer_id &&
+        !(bill.customer_mobile && c.mobile === bill.customer_mobile) &&
+        !(!bill.customer_mobile && c.name?.toLowerCase() === bill.customer_name?.toLowerCase())
+      );
+      setLocalItem(STORAGE_KEYS.CUSTOMERS, updatedCustomers);
+    }
 
     this.addAuditLog(
       'BILL_CANCELLED',

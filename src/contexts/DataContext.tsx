@@ -72,17 +72,28 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Then try Supabase in background as cloud sync layer
     if (isSupabaseConfigured && supabase) {
       try {
-        const [custRes, billRes, payRes, auditRes] = await Promise.all([
+        const [custRes, billRes, payRes, auditRes, itemsRes] = await Promise.all([
           supabase.from('customers').select('*').order('created_at', { ascending: false }),
           supabase.from('bills').select('*').order('created_at', { ascending: false }),
           supabase.from('payments').select('*').order('created_at', { ascending: false }),
           supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200),
+          (supabase as any).from('bill_items').select('*'),
         ]);
 
         if (!custRes.error && !billRes.error && !payRes.error) {
-          const supaBills = (billRes.data as any) || [];
+          const rawBills = (billRes.data as any) || [];
           const supaCustomers = (custRes.data as any) || [];
           const supaPayments = (payRes.data as any) || [];
+          const supaItems = (!itemsRes?.error && itemsRes?.data) ? (itemsRes.data as any) : [];
+
+          // Attach items to each bill so ReceiptModal and PDF generators never encounter undefined items
+          const supaBills = rawBills.map((b: any) => {
+            const billItems = supaItems.filter((it: any) => it.bill_id === b.id);
+            return {
+              ...b,
+              items: (b.items && b.items.length > 0) ? b.items : billItems,
+            };
+          });
 
           // Cross-validate: only include payments that have a matching bill in Supabase.
           // If bills is empty, payments must strictly be empty.
@@ -101,7 +112,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       bill_number: b.bill_number,
                       customer_id: b.customer_id,
                       customer_name: b.customer_name,
-                      customer_mobile: b.customer_mobile,
+                      customer_mobile: b.customer_mobile || '',
                       payment_date: b.bill_date,
                       amount: b.cash_amount,
                       payment_mode: 'CASH',
@@ -116,7 +127,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       bill_number: b.bill_number,
                       customer_id: b.customer_id,
                       customer_name: b.customer_name,
-                      customer_mobile: b.customer_mobile,
+                      customer_mobile: b.customer_mobile || '',
                       payment_date: b.bill_date,
                       amount: b.upi_amount,
                       payment_mode: 'UPI',
@@ -131,7 +142,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     bill_number: b.bill_number,
                     customer_id: b.customer_id,
                     customer_name: b.customer_name,
-                    customer_mobile: b.customer_mobile,
+                    customer_mobile: b.customer_mobile || '',
                     payment_date: b.bill_date,
                     amount: b.total_paid,
                     payment_mode: b.payment_mode || 'CASH',
@@ -143,14 +154,38 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
 
-          setCustomers(supaCustomers);
+          // Dynamically compute aggregate CRM stats for all customers based on fetched bills
+          const enrichedCustomers = supaCustomers.map((cust: any) => {
+            const custBills = supaBills.filter((b: any) => 
+              !b.is_cancelled && (
+                b.customer_id === cust.id || 
+                (cust.mobile && b.customer_mobile && cust.mobile === b.customer_mobile) ||
+                (!cust.mobile && !b.customer_mobile && b.customer_name?.toLowerCase() === cust.name?.toLowerCase())
+              )
+            );
+            const totalPurchases = custBills.reduce((sum: number, b: any) => sum + Number(b.total_amount || 0), 0);
+            const totalPaid = custBills.reduce((sum: number, b: any) => sum + Number(b.total_paid || 0), 0);
+            const outstandingBalance = Math.max(0, totalPurchases - totalPaid);
+            const lastBill = custBills.sort((a: any, b: any) => (b.bill_date > a.bill_date ? 1 : -1))[0];
+
+            return {
+              ...cust,
+              total_purchases: totalPurchases,
+              total_paid: totalPaid,
+              outstanding_balance: outstandingBalance,
+              bill_count: custBills.length,
+              last_purchase_date: lastBill ? lastBill.bill_date : (cust.created_at ? cust.created_at.split('T')[0] : new Date().toISOString().split('T')[0]),
+            };
+          });
+
+          setCustomers(enrichedCustomers);
           setBills(supaBills);
           setPayments(cleanPayments);
           setAuditLogs((auditRes.data as any) || []);
           setWithdrawals(LocalStoreManager.getWithdrawals());
 
           // Always mirror Supabase state directly to localStorage so getMetrics() reads clean data
-          LocalStoreManager.setCustomers(supaCustomers);
+          LocalStoreManager.setCustomers(enrichedCustomers);
           LocalStoreManager.syncStateToLocal(supaBills, cleanPayments);
           setMetrics(LocalStoreManager.getMetrics());
 
@@ -223,12 +258,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const cust = LocalStoreManager.getCustomerById(created.customer_id);
           if (cust) {
             const { total_purchases, total_paid, outstanding_balance, bill_count, last_purchase_date, ...dbCust } = cust as any;
-            await (supabase as any).from('customers').upsert([dbCust]);
+            await (supabase as any).from('customers').upsert([{
+              ...dbCust,
+              mobile: dbCust.mobile || '',
+            }]);
           }
 
           // 2. Insert bill into Supabase (strip items object for table compatibility)
           const { items, ...dbBill } = created as any;
-          await (supabase as any).from('bills').insert([dbBill]);
+          await (supabase as any).from('bills').insert([{
+            ...dbBill,
+            customer_mobile: dbBill.customer_mobile || '',
+          }]);
 
           // 3. Insert bill items into Supabase
           if (created.items && created.items.length > 0) {
@@ -290,28 +331,98 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteBill = async (billId: string): Promise<boolean> => {
     try {
+      const billToDelete = bills.find(b => b.id === billId) || LocalStoreManager.getBillById(billId);
       const deleted = LocalStoreManager.deleteBill(billId);
-      if (!deleted) { error('Bill Not Found', 'Could not locate bill to delete'); return false; }
+      if (!deleted && !billToDelete) {
+        error('Bill Not Found', 'Could not locate bill to delete');
+        return false;
+      }
+      const targetBill = deleted || billToDelete!;
+
       if (isSupabaseConfigured && supabase) {
         try {
-          await (supabase as any).from('payments').delete().eq('bill_id', billId);
+          await (supabase as any).from('payments').delete().or(`bill_id.eq.${billId},bill_number.eq.${targetBill.bill_number}`);
           await (supabase as any).from('bill_items').delete().eq('bill_id', billId);
           await (supabase as any).from('bills').delete().eq('id', billId);
-        } catch (_) {}
+        } catch (supaErr) {
+          console.warn('Supabase delete cascade error:', supaErr);
+        }
       }
-      // Filter React state directly — this is the source of truth in Supabase mode
-      const newBills = bills.filter(b => b.id !== billId);
-      const newPayments = payments.filter(p => p.bill_id !== billId);
+
+      // Filter React state directly
+      const newBills = bills.filter(b => b.id !== billId && b.bill_number !== targetBill.bill_number);
+      const newPayments = payments.filter(p => p.bill_id !== billId && p.bill_number !== targetBill.bill_number);
+
+      // Customer handling: check if customer has other remaining bills
+      const customerId = targetBill.customer_id;
+      const customerHasOtherBills = newBills.some(b => 
+        (customerId && b.customer_id === customerId) ||
+        (targetBill.customer_mobile && b.customer_mobile === targetBill.customer_mobile) ||
+        (!targetBill.customer_mobile && b.customer_name?.toLowerCase() === targetBill.customer_name?.toLowerCase())
+      );
+
+      let updatedCustomers: Customer[];
+      if (!customerHasOtherBills) {
+        // Customer was solely associated with this bill - delete customer too
+        updatedCustomers = customers.filter(c => 
+          c.id !== customerId && 
+          !(targetBill.customer_mobile && c.mobile === targetBill.customer_mobile) &&
+          !(!targetBill.customer_mobile && c.name?.toLowerCase() === targetBill.customer_name?.toLowerCase())
+        );
+        if (isSupabaseConfigured && supabase) {
+          try {
+            if (customerId) {
+              await (supabase as any).from('customers').delete().eq('id', customerId);
+            } else if (targetBill.customer_mobile) {
+              await (supabase as any).from('customers').delete().eq('mobile', targetBill.customer_mobile);
+            }
+          } catch (custDelErr) {
+            console.warn('Supabase customer delete error:', custDelErr);
+          }
+        }
+      } else {
+        // Recompute aggregate stats for the customer with remaining bills
+        updatedCustomers = customers.map(c => {
+          const isTargetCustomer = c.id === customerId || 
+            (targetBill.customer_mobile && c.mobile === targetBill.customer_mobile) ||
+            (!targetBill.customer_mobile && c.name?.toLowerCase() === targetBill.customer_name?.toLowerCase());
+          if (!isTargetCustomer) return c;
+
+          const custBills = newBills.filter(b => 
+            !b.is_cancelled && (
+              b.customer_id === c.id || 
+              (c.mobile && b.customer_mobile && c.mobile === b.customer_mobile) ||
+              (!c.mobile && !b.customer_mobile && b.customer_name?.toLowerCase() === c.name?.toLowerCase())
+            )
+          );
+          const totalPurchases = custBills.reduce((sum, b) => sum + (b.total_amount || 0), 0);
+          const totalPaid = custBills.reduce((sum, b) => sum + (b.total_paid || 0), 0);
+          const outstanding = Math.max(0, totalPurchases - totalPaid);
+          const lastBill = custBills.sort((a, b) => (b.bill_date > a.bill_date ? 1 : -1))[0];
+
+          return {
+            ...c,
+            total_purchases: totalPurchases,
+            total_paid: totalPaid,
+            outstanding_balance: outstanding,
+            bill_count: custBills.length,
+            last_purchase_date: lastBill ? lastBill.bill_date : c.created_at.split('T')[0],
+          };
+        });
+      }
+
       // Sync filtered state to localStorage so getMetrics() reads fresh data
       LocalStoreManager.syncStateToLocal(newBills, newPayments);
+      LocalStoreManager.setCustomers(updatedCustomers);
+
       setBills(newBills);
       setPayments(newPayments);
       setWithdrawals(LocalStoreManager.getWithdrawals());
-      setCustomers(LocalStoreManager.getCustomers());
+      setCustomers(updatedCustomers);
       setAuditLogs(LocalStoreManager.getAuditLogs());
-      // Now metrics reads from correct localStorage
       setMetrics(LocalStoreManager.getMetrics());
-      error('Bill Deleted', `Bill #${deleted.bill_number} permanently removed.`);
+
+      error('Bill Deleted', `Bill #${targetBill.bill_number} and all associated entries permanently removed.`);
       return true;
     } catch (err: any) {
       error('Error deleting bill', err.message);
@@ -339,7 +450,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCustomers(LocalStoreManager.getCustomers());
       setAuditLogs(LocalStoreManager.getAuditLogs());
       setMetrics(LocalStoreManager.getMetrics());
-      success('Payment Recorded!', `Received ₹${paymentData.amount} (${paymentData.payment_mode}) from ${paymentData.customer_name}`);
+      success('Payment Recorded', `₹${newPayment.amount} received via ${newPayment.payment_mode}`);
       return newPayment;
     } catch (err: any) {
       error('Failed to record payment', err.message);
@@ -353,10 +464,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (isSupabaseConfigured && supabase) {
         try {
           const { total_purchases, total_paid, outstanding_balance, bill_count, last_purchase_date, ...dbCust } = saved as any;
+          const payload = { ...dbCust, mobile: dbCust.mobile || '' };
           if (custData.id) {
-            await (supabase as any).from('customers').update(dbCust).eq('id', custData.id);
+            await (supabase as any).from('customers').update(payload).eq('id', custData.id);
           } else {
-            await (supabase as any).from('customers').insert([dbCust]);
+            await (supabase as any).from('customers').insert([payload]);
           }
         } catch (supaErr) {
           console.warn('Supabase customer sync error:', supaErr);
